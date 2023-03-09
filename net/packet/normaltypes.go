@@ -2,8 +2,10 @@ package packet
 
 import (
 	"errors"
-	"github.com/google/uuid"
 	"io"
+	"math"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -224,8 +226,90 @@ func (s String) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 func (s *String) ReadFrom(r io.Reader) (n int64, err error) {
-	//TODO implement me
-	panic("implement me")
+	var v VarInt
+	nn, err := v.ReadFrom(r)
+	if err != nil {
+		return nn, err
+	}
+	n += nn
+	bs := make([]byte, v)
+	_, err = io.ReadFull(r, bs)
+	if err != nil {
+		return n, err
+	}
+	n += int64(v)
+	*s = String(bs)
+	return n, err
+}
+
+func (f Float) WriteTo(w io.Writer) (n int64, err error) {
+	return Int(math.Float32bits(float32(f))).WriteTo(w)
+}
+
+func (f *Float) ReadFrom(r io.Reader) (n int64, err error) {
+	var v Int
+	n, err = v.ReadFrom(r)
+	if err != nil {
+		return n, err
+	}
+	*f = Float(math.Float32frombits(uint32(v)))
+	return n, err
+}
+
+func (d Double) WriteTo(w io.Writer) (n int64, err error) {
+	return Long(math.Float64bits(float64(d))).WriteTo(w)
+}
+
+func (d *Double) ReadFrom(r io.Reader) (n int64, err error) {
+	var v Long
+	n, err = v.ReadFrom(r)
+	if err != nil {
+		return n, err
+	}
+	*d = Double(math.Float64frombits(uint64(v)))
+	return n, err
+}
+
+func (a Angle) WriteTo(w io.Writer) (n int64, err error) {
+	return Byte(a).WriteTo(w)
+}
+
+func (a *Angle) ReadFrom(r io.Reader) (n int64, err error) {
+	return (*Byte)(a).ReadFrom(r)
+}
+
+func (u UUID) WriteTo(w io.Writer) (n int64, err error) {
+	nn, err := w.Write(u[:])
+	return int64(nn), err
+}
+
+func (u *UUID) ReadFrom(r io.Reader) (n int64, err error) {
+	nn, err := io.ReadFull(r, (*u)[:])
+	return int64(nn), err
+}
+
+func (b ByteArray) WriteTo(w io.Writer) (n int64, err error) {
+	n1, err := VarInt(len(b)).WriteTo(w)
+	if err != nil {
+		return n1, err
+	}
+	n2, err := w.Write(b)
+	return n1 + int64(n2), err
+}
+
+func (b *ByteArray) ReadFrom(r io.Reader) (n int64, err error) {
+	var Len VarInt
+	n1, err := Len.ReadFrom(r)
+	if err != nil {
+		return n1, err
+	}
+	if cap(*b) < int(Len) {
+		*b = make(ByteArray, Len)
+	} else {
+		*b = (*b)[:Len]
+	}
+	n2, err := io.ReadFull(r, *b)
+	return n1 + int64(n2), err
 }
 
 type Field interface {
@@ -253,13 +337,21 @@ type (
 	String     string
 	Chat       = String
 	Identifier = String
-	Angle      byte
+	Angle      Byte
 	UUID       uuid.UUID
 	ByteArray  []byte
 	Position   struct {
 		X, Y, Z int
 	}
 )
+
+func (a Angle) ToDeg() float64 {
+	return 360 * float64(a) / 256
+}
+
+func (a Angle) ToRad() float64 {
+	return 2 * math.Pi * float64(a) / 256
+}
 
 func readByte(r io.Reader) (int64, byte, error) {
 	rb, ok := r.(io.ByteReader)
